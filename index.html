@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Prédiction du Risque d'Inondation</title>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@600;800&display=swap" rel="stylesheet"/>
+
+  <style>
+    :root {
+      --bg:        #0a0f1a;
+      --panel:     #0e1625;
+      --border:    #1e2d45;
+      --accent:    #00d4ff;
+      --danger:    #ff3b3b;
+      --warn:      #ffaa00;
+      --safe:      #00e676;
+      --text:      #cfe4f5;
+      --muted:     #4a6a8a;
+      --glow-blue: 0 0 18px rgba(0,212,255,.45);
+      --glow-red:  0 0 18px rgba(255,59,59,.55);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── TOP BAR ── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 20px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      z-index: 1000;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+
+    .logo {
+      font-family: 'Syne', sans-serif;
+      font-weight: 800;
+      font-size: 1rem;
+      letter-spacing: .04em;
+      color: var(--accent);
+      text-shadow: var(--glow-blue);
+      white-space: nowrap;
+    }
+    .logo span { color: var(--text); }
+
+    .header-meta {
+      display: flex;
+      gap: 18px;
+      font-size: .68rem;
+      color: var(--muted);
+    }
+    .header-meta b { color: var(--text); }
+
+    .pipeline-badge {
+      font-size: .62rem;
+      padding: 4px 10px;
+      border: 1px solid var(--accent);
+      border-radius: 3px;
+      color: var(--accent);
+      letter-spacing: .06em;
+      white-space: nowrap;
+    }
+
+    /* ── MAIN LAYOUT ── */
+    main {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── MAP ── */
+    #map {
+      flex: 1;
+      position: relative;
+    }
+
+    /* ── SIDE PANEL ── */
+    aside {
+      width: 300px;
+      flex-shrink: 0;
+      background: var(--panel);
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      z-index: 500;
+    }
+
+    .panel-section {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .panel-title {
+      font-family: 'Syne', sans-serif;
+      font-size: .72rem;
+      font-weight: 600;
+      letter-spacing: .12em;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    /* AUC gauge */
+    .gauge-wrap { display: flex; align-items: center; gap: 12px; }
+    .gauge-circle {
+      width: 62px; height: 62px;
+      border-radius: 50%;
+      border: 3px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+      position: relative;
+      flex-shrink: 0;
+    }
+    .gauge-circle svg { position: absolute; top: 0; left: 0; transform: rotate(-90deg); }
+    .gauge-circle .val {
+      font-family: 'Syne', sans-serif;
+      font-size: .95rem;
+      font-weight: 800;
+      color: var(--accent);
+      position: relative;
+    }
+    .gauge-info { font-size: .7rem; color: var(--muted); line-height: 1.6; }
+    .gauge-info b { color: var(--text); display: block; margin-bottom: 2px; }
+
+    /* Recall bar */
+    .metric-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .metric-label { font-size: .67rem; color: var(--muted); width: 100px; flex-shrink: 0; }
+    .bar-track { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 3px; transition: width 1.2s ease; }
+    .metric-val { font-size: .67rem; color: var(--text); width: 36px; text-align: right; flex-shrink: 0; }
+
+    /* Alerts list */
+    .alert-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .alert-item:last-child { border-bottom: none; }
+
+    .alert-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      margin-top: 3px;
+      flex-shrink: 0;
+    }
+    .dot-danger { background: var(--danger); box-shadow: var(--glow-red); }
+    .dot-warn   { background: var(--warn); box-shadow: 0 0 10px rgba(255,170,0,.5); }
+    .dot-safe   { background: var(--safe); box-shadow: 0 0 10px rgba(0,230,118,.4); }
+
+    .alert-text { font-size: .68rem; line-height: 1.55; }
+    .alert-text strong { display: block; color: var(--text); margin-bottom: 2px; }
+    .alert-conf { font-size: .6rem; color: var(--muted); }
+
+    /* Pipeline steps */
+    .pipeline-steps { display: flex; flex-direction: column; gap: 6px; }
+    .step {
+      display: flex; align-items: center; gap: 8px;
+      font-size: .67rem; color: var(--muted);
+    }
+    .step-num {
+      width: 20px; height: 20px; border-radius: 50%;
+      background: var(--border);
+      display: flex; align-items: center; justify-content: center;
+      font-size: .6rem;
+      color: var(--accent);
+      flex-shrink: 0;
+    }
+    .step.active .step-num { background: var(--accent); color: #000; }
+    .step.active { color: var(--text); }
+
+    /* Forecast timer */
+    .forecast-row {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: .7rem;
+    }
+    .forecast-row .val {
+      font-family: 'Syne', sans-serif;
+      font-weight: 800;
+      font-size: 1.2rem;
+      color: var(--accent);
+      text-shadow: var(--glow-blue);
+    }
+
+    /* ── MAP CONTROLS overlay ── */
+    .map-overlay {
+      position: absolute;
+      top: 12px; left: 12px;
+      z-index: 800;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .ctrl-btn {
+      background: rgba(14,22,37,.9);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      font-size: .68rem;
+      padding: 6px 12px;
+      cursor: pointer;
+      border-radius: 3px;
+      transition: all .2s;
+      white-space: nowrap;
+    }
+    .ctrl-btn:hover, .ctrl-btn.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      box-shadow: var(--glow-blue);
+    }
+
+    /* Legend */
+    .legend {
+      position: absolute;
+      bottom: 30px; left: 12px;
+      z-index: 800;
+      background: rgba(14,22,37,.92);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 10px 14px;
+      font-size: .65rem;
+    }
+    .legend-title {
+      font-family: 'Syne', sans-serif;
+      font-size: .65rem;
+      font-weight: 600;
+      color: var(--accent);
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .legend-item { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+    .legend-swatch {
+      width: 14px; height: 14px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    /* Tooltip */
+    .custom-tooltip {
+      background: rgba(10,15,26,.95) !important;
+      border: 1px solid var(--accent) !important;
+      border-radius: 4px !important;
+      color: var(--text) !important;
+      font-family: 'DM Mono', monospace !important;
+      font-size: .68rem !important;
+      padding: 10px 14px !important;
+      box-shadow: var(--glow-blue) !important;
+    }
+
+    /* Pulse animation for high-risk markers */
+    @keyframes pulse {
+      0%   { transform: scale(1); opacity: 1; }
+      50%  { transform: scale(1.5); opacity: .4; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+    .pulse-icon { animation: pulse 1.8s infinite; }
+
+    /* Scrollbar */
+    aside::-webkit-scrollbar { width: 4px; }
+    aside::-webkit-scrollbar-track { background: var(--panel); }
+    aside::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* tick blink */
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+    .blink { animation: blink 1s infinite; }
+  </style>
+</head>
+<body>
+
+<!-- ─── HEADER ─── -->
+<header>
+  <div class="logo">FLOOD<span>RISK</span> · PREDICT</div>
+  <div class="header-meta">
+    <span>Modèle <b>Gradient Boosting</b></span>
+    <span>Sources: <b>Radar · MNT · Occ.Sol</b></span>
+    <span>Mise à jour: <b id="clock">--:--:--</b></span>
+  </div>
+  <div class="pipeline-badge blink">▶ PIPELINE ACTIF</div>
+</header>
+
+<!-- ─── MAIN ─── -->
+<main>
+
+  <!-- MAP -->
+  <div id="map">
+    <!-- Overlay controls -->
+    <div class="map-overlay">
+      <button class="ctrl-btn active" onclick="toggleLayer('risk')">Zones de risque</button>
+      <button class="ctrl-btn" onclick="toggleLayer('pluvio')">Données pluviométriques</button>
+      <button class="ctrl-btn" onclick="toggleLayer('topo')">Topographie (MNT)</button>
+      <button class="ctrl-btn" onclick="addNewAlert()">＋ Simuler alerte</button>
+    </div>
+
+    <!-- Legend -->
+    <div class="legend">
+      <div class="legend-title">Niveau de risque</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#ff3b3b;opacity:.75;"></div> Risque élevé (&gt; 0.75)</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#ffaa00;opacity:.75;"></div> Risque modéré (0.4–0.75)</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#00e676;opacity:.75;"></div> Risque faible (&lt; 0.4)</div>
+      <div class="legend-item"><div class="legend-swatch" style="background:#00d4ff;opacity:.6;border-radius:50%;"></div> Station pluviométrique</div>
+    </div>
+  </div>
+
+  <!-- SIDE PANEL -->
+  <aside>
+
+    <!-- Forecast horizon -->
+    <div class="panel-section">
+      <div class="panel-title">Horizon de prévision</div>
+      <div class="forecast-row">
+        <span>Fenêtre active</span>
+        <span class="val" id="countdown">24h00</span>
+      </div>
+      <div style="margin-top:8px;font-size:.65rem;color:var(--muted);">
+        Prochaine exécution du modèle dans <b id="next-run" style="color:var(--text);">--:--</b>
+      </div>
+    </div>
+
+    <!-- Evaluation metrics -->
+    <div class="panel-section">
+      <div class="panel-title">Évaluation du modèle</div>
+      <div class="gauge-wrap">
+        <div class="gauge-circle">
+          <svg width="62" height="62" viewBox="0 0 62 62">
+            <circle cx="31" cy="31" r="27" fill="none" stroke="#1e2d45" stroke-width="5"/>
+            <circle cx="31" cy="31" r="27" fill="none" stroke="#00d4ff" stroke-width="5"
+              stroke-dasharray="169.6" stroke-dashoffset="25.4"
+              stroke-linecap="round"/>
+          </svg>
+          <span class="val">AUC</span>
+        </div>
+        <div class="gauge-info">
+          <b>0.912</b>
+          Classification binaire<br/>risque / non-risque<br/>
+          <span style="color:var(--safe);">↑ Gradient Boosting</span>
+        </div>
+      </div>
+
+      <div style="margin-top:12px;">
+        <div class="metric-row">
+          <span class="metric-label">Rappel événements</span>
+          <div class="bar-track"><div class="bar-fill" style="width:87%;background:var(--accent);"></div></div>
+          <span class="metric-val">87%</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">Précision</span>
+          <div class="bar-track"><div class="bar-fill" style="width:83%;background:var(--warn);"></div></div>
+          <span class="metric-val">83%</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">vs Bulletins off.</span>
+          <div class="bar-track"><div class="bar-fill" style="width:79%;background:var(--safe);"></div></div>
+          <span class="metric-val">+79%</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Alerts géolocalisées -->
+    <div class="panel-section" style="flex:1;">
+      <div class="panel-title">Alertes géolocalisées · <span id="alert-count" style="color:var(--accent);">0</span></div>
+      <div id="alerts-list"></div>
+    </div>
+
+    <!-- Pipeline steps -->
+    <div class="panel-section">
+      <div class="panel-title">Pipeline de traitement</div>
+      <div class="pipeline-steps">
+        <div class="step active"><div class="step-num">1</div> Fusion Radar + MNT + Occ.Sol</div>
+        <div class="step active"><div class="step-num">2</div> Feature engineering</div>
+        <div class="step active"><div class="step-num">3</div> Classification Gradient Boosting</div>
+        <div class="step"><div class="step-num">4</div> Cartographie zones 24h</div>
+        <div class="step"><div class="step-num">5</div> Diffusion services protection civile</div>
+      </div>
+    </div>
+
+  </aside>
+</main>
+
+<script>
+/* ────────────────────────────────────────────
+   DATA  –  zones + stations simulées
+───────────────────────────────────────────── */
+const riskZones = [
+  { latlng:[12.11, 15.04], radius:9000, conf:.91, level:'danger', label:'Vallée du Chari' },
+  { latlng:[12.05, 15.28], radius:7000, conf:.83, level:'danger', label:'Plaine de N\'Djamena Est' },
+  { latlng:[12.18, 14.88], radius:6500, conf:.71, level:'warn',   label:'Bassin versant Nord' },
+  { latlng:[11.95, 15.10], radius:8000, conf:.68, level:'warn',   label:'Zone deltaïque Sud' },
+  { latlng:[12.25, 15.20], radius:5000, conf:.33, level:'safe',   label:'Plateau Central' },
+  { latlng:[12.02, 14.78], radius:4500, conf:.29, level:'safe',   label:'Zone urbaine Haute' },
+  { latlng:[11.88, 15.35], radius:7500, conf:.88, level:'danger', label:'Dépression Logone' },
+  { latlng:[12.30, 14.95], radius:6000, conf:.45, level:'warn',   label:'Versant Occidental' },
+];
+
+const pluvioStations = [
+  { latlng:[12.11, 15.04], name:'Station Chari', rain:148, trend:'↑' },
+  { latlng:[12.05, 15.28], name:'Station Est',   rain:132, trend:'↑↑' },
+  { latlng:[12.18, 14.88], name:'Station Nord',  rain: 94, trend:'→' },
+  { latlng:[11.88, 15.35], name:'Station Logone',rain:161, trend:'↑↑' },
+  { latlng:[12.25, 15.20], name:'Station Plateau',rain: 45, trend:'↓' },
+];
+
+const colorMap = { danger:'#ff3b3b', warn:'#ffaa00', safe:'#00e676' };
+const labelMap = { danger:'RISQUE ÉLEVÉ', warn:'RISQUE MODÉRÉ', safe:'RISQUE FAIBLE' };
+
+/* ────────────────────────────────────────────
+   MAP INIT
+───────────────────────────────────────────── */
+const map = L.map('map', { zoomControl: false }).setView([12.10, 15.05], 10);
+
+L.tileLayer(
+  'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+  { attribution: '©OpenStreetMap ©CartoDB', maxZoom: 18 }
+).addTo(map);
+
+L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+/* ────────────────────────────────────────────
+   LAYERS
+───────────────────────────────────────────── */
+const riskLayer   = L.layerGroup().addTo(map);
+const pluvioLayer = L.layerGroup();
+const topoLayer   = L.layerGroup();
+
+let layers = { risk: true, pluvio: false, topo: false };
+
+function toggleLayer(name) {
+  layers[name] = !layers[name];
+  document.querySelectorAll('.ctrl-btn').forEach((b,i)=>{
+    const ns = ['risk','pluvio','topo'];
+    if(ns[i] === name) b.classList.toggle('active', layers[name]);
+  });
+  if (name === 'risk')   layers.risk   ? map.addLayer(riskLayer)   : map.removeLayer(riskLayer);
+  if (name === 'pluvio') layers.pluvio ? map.addLayer(pluvioLayer) : map.removeLayer(pluvioLayer);
+  if (name === 'topo')   layers.topo   ? map.addLayer(topoLayer)   : map.removeLayer(topoLayer);
+}
+
+/* ── Risk circles ── */
+riskZones.forEach(z => {
+  const circle = L.circle(z.latlng, {
+    radius: z.radius,
+    color: colorMap[z.level],
+    fillColor: colorMap[z.level],
+    fillOpacity: 0.22,
+    weight: 1.5,
+    opacity: 0.7,
+  }).addTo(riskLayer);
+
+  circle.bindTooltip(`
+    <div style="font-family:'DM Mono',monospace;font-size:.72rem;">
+      <b style="color:${colorMap[z.level]};display:block;margin-bottom:4px;">${labelMap[z.level]}</b>
+      📍 ${z.label}<br/>
+      🎯 Confiance modèle : <b>${(z.conf*100).toFixed(0)}%</b><br/>
+      ⏱ Horizon : 24h
+    </div>
+  `, { className: 'custom-tooltip', sticky: true });
+
+  // Add a centre marker for high-risk
+  if (z.level === 'danger') {
+    const icon = L.divIcon({
+      className: '',
+      html: `<div style="width:12px;height:12px;border-radius:50%;background:${colorMap[z.level]};border:2px solid #fff;box-shadow:0 0 10px ${colorMap[z.level]};"></div>`,
+      iconSize: [12,12],
+      iconAnchor: [6,6]
+    });
+    L.marker(z.latlng, { icon }).addTo(riskLayer);
+  }
+});
+
+/* ── Pluvio stations ── */
+pluvioStations.forEach(s => {
+  const icon = L.divIcon({
+    className: '',
+    html: `<div style="width:16px;height:16px;border-radius:50%;background:#00d4ff;border:2px solid #fff;opacity:.85;display:flex;align-items:center;justify-content:center;font-size:8px;"></div>`,
+    iconSize: [16,16], iconAnchor: [8,8]
+  });
+  L.marker(s.latlng, { icon })
+    .bindTooltip(`
+      <div style="font-family:'DM Mono',monospace;font-size:.72rem;">
+        <b style="color:#00d4ff;display:block;margin-bottom:4px;">${s.name}</b>
+        🌧 Précipitations : <b>${s.rain} mm/24h</b><br/>
+        Tendance : <b>${s.trend}</b>
+      </div>
+    `, { className: 'custom-tooltip', sticky: true })
+    .addTo(pluvioLayer);
+});
+
+/* ── Topo grid (simulated isolines) ── */
+const topoLines = [
+  [[12.00,14.75],[12.05,14.90],[12.10,15.00],[12.15,15.15],[12.20,15.30]],
+  [[11.90,14.85],[11.95,15.00],[12.00,15.10],[12.05,15.25],[12.10,15.40]],
+  [[12.20,14.80],[12.25,14.95],[12.30,15.10],[12.35,15.20]],
+];
+topoLines.forEach(pts => {
+  L.polyline(pts, { color:'#4a6a8a', weight:1, opacity:.5, dashArray:'4,6' }).addTo(topoLayer);
+});
+
+/* ────────────────────────────────────────────
+   ALERTS PANEL
+───────────────────────────────────────────── */
+const alertsList = document.getElementById('alerts-list');
+const alertCount = document.getElementById('alert-count');
+let alerts = [];
+
+function addAlertToPanel(zone) {
+  alerts.unshift(zone);
+  if (alerts.length > 8) alerts.pop();
+  alertCount.textContent = alerts.length;
+
+  alertsList.innerHTML = alerts.map(a => `
+    <div class="alert-item">
+      <div class="alert-dot dot-${a.level}"></div>
+      <div class="alert-text">
+        <strong>${a.label}</strong>
+        ${labelMap[a.level]} — conf. ${(a.conf*100).toFixed(0)}%
+        <span class="alert-conf">Transmission: Protection Civile ✓</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+// Pre-populate with danger zones
+riskZones.filter(z=>z.level==='danger').forEach(z => addAlertToPanel(z));
+
+/* ────────────────────────────────────────────
+   SIMULATE NEW ALERT
+───────────────────────────────────────────── */
+const simZones = [
+  { latlng:[12.08,15.18], radius:5500, conf:.88, level:'danger', label:'Quartier Moursal' },
+  { latlng:[11.92,15.05], radius:4800, conf:.74, level:'warn',   label:'Faubourg Diguel' },
+  { latlng:[12.22,15.08], radius:6000, conf:.91, level:'danger', label:'Zone Industrielle Nord' },
+];
+let simIdx = 0;
+
+function addNewAlert() {
+  const z = simZones[simIdx % simZones.length];
+  simIdx++;
+
+  const circle = L.circle(z.latlng, {
+    radius: z.radius,
+    color: colorMap[z.level],
+    fillColor: colorMap[z.level],
+    fillOpacity: 0.28,
+    weight: 2,
+    opacity: .85,
+    className: 'pulse-icon'
+  }).addTo(riskLayer);
+
+  circle.bindTooltip(`
+    <div style="font-family:'DM Mono',monospace;font-size:.72rem;">
+      <b style="color:${colorMap[z.level]};display:block;margin-bottom:4px;">🆕 NOUVELLE ALERTE</b>
+      📍 ${z.label}<br/>
+      🎯 Confiance : <b>${(z.conf*100).toFixed(0)}%</b>
+    </div>
+  `, { className: 'custom-tooltip', sticky: true });
+
+  map.flyTo(z.latlng, 12, { duration: 1.2 });
+  addAlertToPanel(z);
+}
+
+/* ────────────────────────────────────────────
+   CLOCKS
+───────────────────────────────────────────── */
+function updateClock() {
+  const now = new Date();
+  document.getElementById('clock').textContent = now.toLocaleTimeString('fr-FR');
+
+  // countdown: 24h from midnight
+  const secLeft = (24*3600) - (now.getHours()*3600 + now.getMinutes()*60 + now.getSeconds());
+  const h = String(Math.floor(secLeft/3600)).padStart(2,'0');
+  const m = String(Math.floor((secLeft%3600)/60)).padStart(2,'0');
+  document.getElementById('countdown').textContent = `${h}h${m}`;
+
+  // next run: every 6h
+  const runIntervalSec = 6*3600;
+  const secsIntoInterval = (now.getHours()*3600 + now.getMinutes()*60 + now.getSeconds()) % runIntervalSec;
+  const secsUntilRun = runIntervalSec - secsIntoInterval;
+  const rh = String(Math.floor(secsUntilRun/3600)).padStart(2,'0');
+  const rm = String(Math.floor((secsUntilRun%3600)/60)).padStart(2,'0');
+  document.getElementById('next-run').textContent = `${rh}h${rm}`;
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+/* Animate pipeline steps */
+const steps = document.querySelectorAll('.pipeline-steps .step');
+let stepIdx = 3;
+setInterval(() => {
+  if (stepIdx < steps.length) {
+    steps[stepIdx].classList.add('active');
+    stepIdx++;
+  }
+}, 800);
+</script>
+</body>
+</html>
